@@ -16,6 +16,9 @@ public:
   const char *getCode() const { return code; }
   size_t getCodeSizeBytes() { return codeSizeBytes; }
 
+  size_t getPublicSymbolNum() const { return publicSymbolsNum; }
+  const int32_t *getPublicSymbolTable() const { return publicSymbolTable; }
+
   const char *getAddressFor(size_t offset) const;
 
   const char *getStringAt(size_t offset) const;

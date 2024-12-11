@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ByteFile.h"
-
 namespace lama {
+
+class ByteFile;
 
 void interpret(ByteFile &byteFile);
 
