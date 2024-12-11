@@ -1,0 +1,10 @@
+build
+.clangd
+compile_commands.json
+*.o
+rapidlama
+compile_flags.txt
+env.sh
+.cache
+*.log
+*.bc
