@@ -1,11 +1,11 @@
 #include "ByteFile.h"
 #include "Error.h"
-#include <fstream>
 #include <algorithm>
+#include <fstream>
 
 using namespace lama;
 
-ByteFile::ByteFile(std::unique_ptr<const char[]> data, size_t sizeBytes)
+ByteFile::ByteFile(std::unique_ptr<const uint8_t[]> data, size_t sizeBytes)
     : data(std::move(data)), sizeBytes(sizeBytes) {
   init();
 }
@@ -56,10 +56,10 @@ void ByteFile::init() {
         fmt::format("bytefile is too small to hold string table of {} bytes",
                     stringTableSizeBytes));
   }
-  stringTable = data.get() + currentOffset;
+  stringTable = reinterpret_cast<const char *>(data.get() + currentOffset);
   currentOffset += stringTableSizeBytes;
 
-  code = &stringTable[stringTableSizeBytes];
+  code = data.get() + currentOffset;
   codeSizeBytes = sizeBytes - currentOffset;
 }
 
@@ -70,12 +70,12 @@ ByteFile ByteFile::load(std::string path) {
   }
   auto sizeBytes = stream.tellg();
   stream.seekg(0, std::ios::beg);
-  std::unique_ptr<char[]> data(new char[sizeBytes]);
-  stream.read(data.get(), sizeBytes);
+  std::unique_ptr<uint8_t[]> data(new uint8_t[sizeBytes]);
+  stream.read((char *)data.get(), sizeBytes);
   return ByteFile(std::move(data), sizeBytes);
 }
 
-const char *ByteFile::getAddressFor(size_t offset) const {
+const uint8_t *ByteFile::getAddressFor(size_t offset) const {
   if (offset >= codeSizeBytes) {
     runtimeError("access instruction address {:#x} out of bounds [0, {:#x})",
                  offset, codeSizeBytes);

@@ -114,9 +114,9 @@ struct Stack {
   }
 
   static void beginFunction(size_t nargs, size_t nlocals);
-  static const char *endFunction();
+  static const uint8_t *endFunction();
 
-  static void setNextReturnAddress(const char *address) {
+  static void setNextReturnAddress(const uint8_t *address) {
     nextReturnAddress = address;
   }
   static void setNextIsClosure(bool isClousre) { nextIsClosure = isClousre; }
@@ -139,14 +139,14 @@ private:
     size_t nargs;
     size_t nlocals;
     Value *operandStackBase;
-    const char *returnAddress;
+    const uint8_t *returnAddress;
   };
 
   static Frame frame;
   static std::array<Frame, FRAME_STACK_SIZE> frameStack;
   static size_t frameStackSize;
 
-  static const char *nextReturnAddress;
+  static const uint8_t *nextReturnAddress;
   static bool nextIsClosure;
 };
 
@@ -157,7 +157,7 @@ std::array<Value, STACK_SIZE> Stack::data;
 Stack::Frame Stack::frame;
 std::array<Stack::Frame, FRAME_STACK_SIZE> Stack::frameStack;
 size_t Stack::frameStackSize = 0;
-const char *Stack::nextReturnAddress;
+const uint8_t *Stack::nextReturnAddress;
 bool Stack::nextIsClosure;
 
 Value Stack::getClosure() { return frame.base[frame.nargs]; }
@@ -200,7 +200,7 @@ void Stack::beginFunction(size_t nargs, size_t nlocals) {
   memset(top() + 1, 1, (char *)frame.base - (char *)(top() + 1));
 }
 
-const char *Stack::endFunction() {
+const uint8_t *Stack::endFunction() {
   if (isEmpty()) {
     runtimeError("no function to end");
   }
@@ -209,7 +209,7 @@ const char *Stack::endFunction() {
         "attempt to end function with operand stack size {}, expected 1",
         getOperandStackSize());
   }
-  const char *returnAddress = frame.returnAddress;
+  const uint8_t *returnAddress = frame.returnAddress;
   Value ret = peakOperand();
   frame = frameStack[--frameStackSize];
   top() = frame.top;
@@ -233,9 +233,9 @@ static Value createSexp(size_t nargs) {
   return reinterpret_cast<Value>(Bsexp_(Stack::top() + 1, nargs));
 }
 
-static Value createClosure(const char *entry, size_t nvars) {
+static Value createClosure(const uint8_t *entry, size_t nvars) {
   return reinterpret_cast<Value>(
-      Bclosure_(Stack::top() + 1, nvars, const_cast<char *>(entry)));
+      Bclosure_(Stack::top() + 1, nvars, const_cast<uint8_t *>(entry)));
 }
 
 static const char unknownFile[] = "<unknown file>";
@@ -261,8 +261,8 @@ private:
 private:
   ByteFile *byteFile;
 
-  const char *instructionPointer;
-  const char *codeEnd;
+  const uint8_t *instructionPointer;
+  const uint8_t *codeEnd;
 } interpreter;
 
 } // namespace
@@ -275,7 +275,7 @@ void Interpreter::run() {
   __gc_init();
   Stack::init();
   while (true) {
-    const char *currentInstruction = instructionPointer;
+    const uint8_t *currentInstruction = instructionPointer;
     try {
       if (!step())
         return;
@@ -404,7 +404,7 @@ bool Interpreter::step() {
     return true;
   }
   case I_END: {
-    const char *returnAddress = Stack::endFunction();
+    const uint8_t *returnAddress = Stack::endFunction();
     if (Stack::isEmpty())
       return false;
     instructionPointer = returnAddress;
@@ -475,7 +475,7 @@ bool Interpreter::step() {
     uint32_t entryOffset = readWord();
     uint32_t n = readWord();
 
-    const char *entry = byteFile->getAddressFor(entryOffset);
+    const uint8_t *entry = byteFile->getAddressFor(entryOffset);
 
     Stack::allocateNOperands(n);
     for (int i = 0; i < n; ++i) {
@@ -499,7 +499,7 @@ bool Interpreter::step() {
                    nargs, Stack::getOperandStackSize());
     }
     Value closure = Stack::top()[nargs + 1];
-    const char *entry = *reinterpret_cast<const char **>(closure);
+    const uint8_t *entry = *reinterpret_cast<const uint8_t **>(closure);
     Stack::setNextReturnAddress(instructionPointer);
     Stack::setNextIsClosure(true);
     instructionPointer = entry;
@@ -507,7 +507,7 @@ bool Interpreter::step() {
   }
   case I_CALL: {
     uint32_t offset = readWord();
-    const char *address = byteFile->getAddressFor(offset);
+    const uint8_t *address = byteFile->getAddressFor(offset);
     readWord();
     Stack::setNextReturnAddress(instructionPointer);
     Stack::setNextIsClosure(false);
