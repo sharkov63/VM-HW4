@@ -4,6 +4,6 @@
 
 namespace lama {
 
-void interpret(ByteFile byteFile);
+void interpret(ByteFile &byteFile);
 
 } // namespace lama

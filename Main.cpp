@@ -13,7 +13,7 @@ int main(int argc, const char **argv) {
   std::string byteFilePath = argv[1];
   try {
     ByteFile byteFile = ByteFile::load(byteFilePath);
-    interpret(std::move(byteFile));
+    interpret(byteFile);
   } catch (std::runtime_error &error) {
     std::cerr << error.what() << std::endl;
     return -1;

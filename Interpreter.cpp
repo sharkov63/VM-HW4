@@ -4,8 +4,6 @@
 #include "Value.h"
 #include <algorithm>
 #include <array>
-#include <iostream>
-#include <vector>
 
 using namespace lama;
 
@@ -320,7 +318,7 @@ namespace {
 class Interpreter {
 public:
   Interpreter() = default;
-  Interpreter(ByteFile byteFile);
+  Interpreter(ByteFile *byteFile);
 
   void run();
 
@@ -334,7 +332,7 @@ private:
   Value &accessVar(char designation, int32_t index);
 
 private:
-  ByteFile byteFile;
+  ByteFile *byteFile;
 
   const char *instructionPointer;
   const char *codeEnd;
@@ -342,10 +340,9 @@ private:
 
 } // namespace
 
-Interpreter::Interpreter(ByteFile byteFile)
-    : byteFile(std::move(byteFile)),
-      instructionPointer(this->byteFile.getCode()),
-      codeEnd(instructionPointer + this->byteFile.getCodeSizeBytes()) {}
+Interpreter::Interpreter(ByteFile *byteFile)
+    : byteFile(byteFile), instructionPointer(this->byteFile->getCode()),
+      codeEnd(instructionPointer + this->byteFile->getCodeSizeBytes()) {}
 
 void Interpreter::run() {
   __gc_init();
@@ -357,7 +354,7 @@ void Interpreter::run() {
         return;
     } catch (std::runtime_error &e) {
       runtimeError("runtime error at {:#x}: {}",
-                   currentInstruction - byteFile.getCode(), e.what());
+                   currentInstruction - byteFile->getCode(), e.what());
     }
   }
 }
@@ -435,7 +432,7 @@ bool Interpreter::step() {
   }
   case I_STRING: {
     uint32_t offset = readWord();
-    const char *cstr = byteFile.getStringAt(offset);
+    const char *cstr = byteFile->getStringAt(offset);
     Value string = createString(cstr);
     Stack::pushOperand(string);
     return true;
@@ -448,7 +445,7 @@ bool Interpreter::step() {
                    "size is only {}",
                    nargs, Stack::getOperandStackSize());
     }
-    const char *string = byteFile.getStringAt(stringOffset);
+    const char *string = byteFile->getStringAt(stringOffset);
     Value tagHash = LtagHash(const_cast<char *>(string));
     std::reverse(Stack::top() + 1, Stack::top() + nargs + 1);
     Stack::pushOperand(0);
@@ -476,7 +473,7 @@ bool Interpreter::step() {
   }
   case I_JMP: {
     uint32_t offset = readWord();
-    instructionPointer = byteFile.getAddressFor(offset);
+    instructionPointer = byteFile->getAddressFor(offset);
     return true;
   }
   case I_END: {
@@ -536,7 +533,7 @@ bool Interpreter::step() {
     uint32_t offset = readWord();
     bool boolValue = Stack::popIntOperand();
     if (boolValue == (bool)low)
-      instructionPointer = byteFile.getAddressFor(offset);
+      instructionPointer = byteFile->getAddressFor(offset);
     return true;
   }
   case I_BEGIN:
@@ -551,7 +548,7 @@ bool Interpreter::step() {
     uint32_t entryOffset = readWord();
     uint32_t n = readWord();
 
-    const char *entry = byteFile.getAddressFor(entryOffset);
+    const char *entry = byteFile->getAddressFor(entryOffset);
 
     Stack::allocateNOperands(n);
     for (int i = 0; i < n; ++i) {
@@ -583,7 +580,7 @@ bool Interpreter::step() {
   }
   case I_CALL: {
     uint32_t offset = readWord();
-    const char *address = byteFile.getAddressFor(offset);
+    const char *address = byteFile->getAddressFor(offset);
     readWord();
     Stack::setNextReturnAddress(instructionPointer);
     Stack::setNextIsClosure(false);
@@ -593,7 +590,7 @@ bool Interpreter::step() {
   case I_TAG: {
     uint32_t stringOffset = readWord();
     uint32_t nargs = readWord();
-    const char *string = byteFile.getStringAt(stringOffset);
+    const char *string = byteFile->getStringAt(stringOffset);
     Value tag = LtagHash(const_cast<char *>(string));
     Value target = Stack::popOperand();
 
@@ -732,8 +729,8 @@ Value &Interpreter::accessVar(char designation, int32_t index) {
   runtimeError("unsupported variable designation {:#x}", designation);
 }
 
-void lama::interpret(ByteFile byteFile) {
+void lama::interpret(ByteFile &byteFile) {
   initGlobalArea();
-  interpreter = Interpreter(std::move(byteFile));
+  interpreter = Interpreter(&byteFile);
   interpreter.run();
 }
