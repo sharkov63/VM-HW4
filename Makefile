@@ -11,17 +11,20 @@ all: rapidlama
 runtime:
 	$(MAKE) -C runtime
 
-Main.o: Main.cpp ByteFile.h Interpreter.h
+Main.o: Main.cpp ByteFile.h Interpreter.h Verifier.h
 	$(CXX) -o $@ $(INTERPRETER_FLAGS) -c Main.cpp
 
 GlobalArea.o: GlobalArea.s
 	$(CXX) -o $@ $(INTERPRETER_FLAGS) -c GlobalArea.s
 
-ByteFile.o: ByteFile.cpp ByteFile.h
+ByteFile.o: ByteFile.cpp ByteFile.h Error.h
 	$(CXX) -o $@ $(INTERPRETER_FLAGS) -c ByteFile.cpp
 
-Interpreter.o: Interpreter.cpp Interpreter.h
+Interpreter.o: Interpreter.cpp Interpreter.h ByteFile.h Inst.h Value.h Error.h
 	$(CXX) -o $@ $(INTERPRETER_FLAGS) -c Interpreter.cpp
+
+Verifier.o: Verifier.cpp Verifier.h
+	$(CXX) -o $@ $(INTERPRETER_FLAGS) -c Verifier.cpp
 
 Barray_.o: Barray_.s
 	$(CC) -o $@ $(INTERPRETER_FLAGS) -c Barray_.s
@@ -32,8 +35,8 @@ Bsexp_.o: Bsexp_.s
 Bclosure_.o: Bclosure_.s
 	$(CC) -o $@ $(INTERPRETER_FLAGS) -c Bclosure_.s
 
-rapidlama: Main.o GlobalArea.o ByteFile.o Interpreter.o Barray_.o Bsexp_.o Bclosure_.o runtime
-	$(CXX) -o $@ $(INTERPRETER_FLAGS) runtime/runtime.o runtime/gc.o Main.o GlobalArea.o ByteFile.o Interpreter.o Barray_.o Bsexp_.o Bclosure_.o
+rapidlama: Main.o GlobalArea.o ByteFile.o Interpreter.o Verifier.o Barray_.o Bsexp_.o Bclosure_.o runtime
+	$(CXX) -o $@ $(INTERPRETER_FLAGS) runtime/runtime.o runtime/gc.o Main.o GlobalArea.o ByteFile.o Verifier.o Interpreter.o Barray_.o Bsexp_.o Bclosure_.o
 
 clean:
 	$(RM) *.a *.o *~ rapidlama

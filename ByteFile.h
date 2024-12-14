@@ -16,11 +16,16 @@ public:
   const uint8_t *getCode() const { return code; }
   size_t getCodeSizeBytes() { return codeSizeBytes; }
 
+  const char *getStringTable() const { return stringTable; }
+  size_t getStringTableSize() const { return stringTableSizeBytes; }
+
   size_t getPublicSymbolNum() const { return publicSymbolsNum; }
   const int32_t *getPublicSymbolTable() const { return publicSymbolTable; }
 
+  [[deprecated]]
   const uint8_t *getAddressFor(size_t offset) const;
 
+  [[deprecated]]
   const char *getStringAt(size_t offset) const;
 
 private:
