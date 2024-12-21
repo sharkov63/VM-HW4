@@ -1,6 +1,5 @@
 #include "ByteFile.h"
 #include "Error.h"
-#include <algorithm>
 #include <fstream>
 
 using namespace lama;
@@ -73,24 +72,4 @@ ByteFile ByteFile::load(std::string path) {
   std::unique_ptr<uint8_t[]> data(new uint8_t[sizeBytes]);
   stream.read((char *)data.get(), sizeBytes);
   return ByteFile(std::move(data), sizeBytes);
-}
-
-const uint8_t *ByteFile::getAddressFor(size_t offset) const {
-  if (offset >= codeSizeBytes) {
-    runtimeError("access instruction address {:#x} out of bounds [0, {:#x})",
-                 offset, codeSizeBytes);
-  }
-  return code + offset;
-}
-
-const char *ByteFile::getStringAt(size_t offset) const {
-  if (offset >= stringTableSizeBytes) {
-    runtimeError("access string at {:#x} out of bounds [0, {:#x}]", offset,
-                 stringTableSizeBytes);
-  }
-  if (std::find(stringTable + offset, stringTable + stringTableSizeBytes,
-                '\0') == stringTable + stringTableSizeBytes) {
-    runtimeError("stringTable has no correct string at {:#x}", offset);
-  }
-  return stringTable + offset;
 }

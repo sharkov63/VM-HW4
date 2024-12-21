@@ -1,6 +1,6 @@
 CC=gcc
 CXX=g++
-COMMON_FLAGS=-m32 -g2 -fstack-protector-all -O2
+COMMON_FLAGS=-m32 -g2 -fstack-protector-all -O3
 INTERPRETER_FLAGS=$(COMMON_FLAGS) -Ifmt/include -DFMT_HEADER_ONLY 
 #REGRESSION_TESTS=$(sort $(filter-out test111, $(notdir $(basename $(wildcard Lama/regression/test*.lama)))))
 LAMAC=lamac
