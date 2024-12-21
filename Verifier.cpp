@@ -45,7 +45,7 @@ private:
   void parse();
   /// \pre #ip is valid
   /// \pre currentOperandStackSize >= 0
-  void enqueue(const uint8_t *ip, int16_t currentOperandStackSize);
+  void enqueue(const uint8_t *ip, int16_t currentOperandStackSize, bool jump);
   void parseAt(const uint8_t *ip);
 
   const uint8_t *lookUpIp(int32_t ioffset);
@@ -76,6 +76,13 @@ public:
   /// \throws InvalidByteFileError
   void parse();
 
+  const uint8_t *getJumpTarget() const noexcept { return jumpTarget; }
+  bool doesStop() const noexcept { return stop; }
+  const uint8_t *getNextIp() const noexcept { return ip; }
+  int32_t getNextOperandStackSize() const noexcept {
+    return currentOperandStackSize;
+  }
+
 private:
   uint8_t nextByte();
   int32_t nextSigned();
@@ -95,6 +102,9 @@ private:
 
   const uint8_t *ip;
   int32_t currentOperandStackSize;
+
+  const uint8_t *jumpTarget = nullptr;
+  bool stop = false;
 };
 
 } // namespace
@@ -143,7 +153,7 @@ int32_t InstParser::nextSigned() {
 
 uint8_t InstParser::nextByte() {
   if (ip >= verifier.codeEnd) {
-    invalidByteFileError("unexpected bytecode end, expected byte");
+    invalidByteFileError("unexpected bytecode end, expected a byte");
   }
   return *ip++;
 }
@@ -164,7 +174,7 @@ void InstParser::parse() {
   case I_BINOP_And:
   case I_BINOP_Or: {
     operandStackPop(2);
-    break;
+    return;
   }
   case I_CONST: {
     int32_t value = nextSigned();
@@ -172,12 +182,12 @@ void InstParser::parse() {
       invalidByteFileError("invalid CONST of {} is out of bounds", value);
     }
     operandStackPush(1);
-    break;
+    return;
   }
   case I_STRING: {
     nextString();
     operandStackPush(1);
-    break;
+    return;
   }
   case I_SEXP: {
     const char *str = nextString();
@@ -187,80 +197,83 @@ void InstParser::parse() {
     }
     operandStackPop(nargs);
     operandStackPush(1);
-    break;
+    return;
   }
   case I_STA: {
     operandStackPop(3);
     operandStackPush(1);
-    break;
+    return;
   }
   case I_JMP: {
     const uint8_t *ip = nextLabel();
-    // TODO
-    break;
+    jumpTarget = ip;
+    stop = true;
+    return;
   }
   case I_END: {
-    // TODO
-    break;
+    stop = true;
+    return;
   }
   case I_DROP: {
     operandStackPop(1);
-    break;
+    return;
   }
   case I_DUP: {
     operandStackPush(1);
-    break;
+    return;
   }
   case I_SWAP: {
-    break;
+    return;
   }
   case I_ELEM: {
     operandStackPop(2);
     operandStackPush(1);
-    break;
+    return;
   }
   case I_LD_Global:
   case I_LD_Local:
   case I_LD_Arg:
   case I_LD_Access: {
     // TODO
-    break;
+    return;
   }
   case I_LDA_Global:
   case I_LDA_Local:
   case I_LDA_Arg:
   case I_LDA_Access: {
     // TODO
-    break;
+    return;
   }
   case I_ST_Global:
   case I_ST_Local:
   case I_ST_Arg:
   case I_ST_Access: {
     // TODO
-    break;
+    return;
   }
   case I_CJMPz:
   case I_CJMPnz: {
     // TODO
-    break;
+    jumpTarget = nextLabel();
+    operandStackPop(1);
+    return;
   }
   case I_BEGIN:
   case I_BEGINcl: {
-    // TODO
-    break;
+    // TODO function
+    return;
   }
   case I_CLOSURE: {
     // TODO
-    break;
+    return;
   }
   case I_CALLC: {
-    // TODO
-    break;
+    // TODO call
+    return;
   }
   case I_CALL: {
-    // TODO
-    break;
+    // TODO call
+    return;
   }
   case I_TAG: {
     const char *str = nextString();
@@ -270,7 +283,7 @@ void InstParser::parse() {
     }
     operandStackPop(1);
     operandStackPush(1);
-    break;
+    return;
   }
   case I_ARRAY: {
     int32_t nelems = nextSigned();
@@ -279,23 +292,23 @@ void InstParser::parse() {
     }
     operandStackPop(1);
     operandStackPush(1);
-    break;
+    return;
   }
   case I_FAIL: {
     nextSigned();
     nextSigned();
     operandStackPush(1);
-    // TODO control-flow
-    break;
+    stop = true;
+    return;
   }
   case I_LINE: {
     nextSigned();
-    break;
+    return;
   }
   case I_PATT_StrCmp: {
     operandStackPop(2);
     operandStackPush(1);
-    break;
+    return;
   }
   case I_PATT_String:
   case I_PATT_Array:
@@ -305,18 +318,18 @@ void InstParser::parse() {
   case I_PATT_Closure: {
     operandStackPop(1);
     operandStackPush(1);
-    break;
+    return;
   }
   case I_CALL_Lread: {
     operandStackPush(1);
-    break;
+    return;
   }
   case I_CALL_Lwrite:
   case I_CALL_Llength:
   case I_CALL_Lstring: {
     operandStackPop(1);
     operandStackPush(1);
-    break;
+    return;
   }
   case I_CALL_Barray: {
     int32_t nargs = nextSigned();
@@ -325,7 +338,7 @@ void InstParser::parse() {
     }
     operandStackPop(nargs);
     operandStackPush(1);
-    break;
+    return;
   }
   default: {
     invalidByteFileError("unsupported instruction code {:#04x}", byte);
@@ -364,12 +377,18 @@ const uint8_t *Verifier::lookUpIp(int32_t ioffset) {
 
 void Verifier::parseAt(const uint8_t *ip) {
   InstParser parser(ip, *this);
-  parser.parse();
+  if (parser.getJumpTarget()) {
+    enqueue(parser.getJumpTarget(), parser.getNextOperandStackSize(),
+            /*jump=*/true);
+  }
+  if (parser.doesStop())
+    return;
+  enqueue(parser.getNextIp(), parser.getNextOperandStackSize(), /*jump=*/false);
 }
 
-void Verifier::enqueue(const uint8_t *ip, int16_t currentOperandStackSize) {
+void Verifier::enqueue(const uint8_t *ip, int16_t currentOperandStackSize,
+                       bool jump) {
   InstInfo *info = instInfoOf(ip);
-  info->rift = true;
   if (info->visited) {
     if (info->operandStackSize != currentOperandStackSize) {
       runtimeError(
@@ -388,7 +407,7 @@ void Verifier::parse() {
   for (int i = 0; i < file.getPublicSymbolNum(); ++i) {
     int32_t ioffset = symtab[2 * i + 1];
     const uint8_t *ip = lookUpIp(ioffset);
-    enqueue(ip, /*currentOperandStackSize=*/0);
+    enqueue(ip, /*currentOperandStackSize=*/0, /*jump=*/true);
   }
   while (!stack.empty()) {
     const uint8_t *ip = stack.back();
