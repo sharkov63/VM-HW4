@@ -7,6 +7,7 @@ enum VarDesignation {
   LOC_Local = 0x1,
   LOC_Arg = 0x2,
   LOC_Access = 0x3,
+  LOC_Last = LOC_Access,
 };
 
 enum InstCode {

@@ -78,6 +78,7 @@ private:
 
   void verifyIp(int32_t ioffset);
   void verifyString(int32_t offset);
+  void verifyLocation(VarDesignation designation, int32_t index);
 
   /// \pre #ip is valid
   int32_t ioffsetOf(const uint8_t *ip) { return ip - codeBegin; }
@@ -129,6 +130,8 @@ private:
   int32_t nextSigned();
   const char *nextString();
   const uint8_t *nextIp();
+  VarDesignation nextDesignation();
+  void nextLoc(VarDesignation designation);
 
   void operandStackPop(int32_t k);
   void operandStackPush(int32_t k);
@@ -170,6 +173,19 @@ void InstParser::operandStackPush(int32_t k) {
     invalidByteFileError("operand stack size overflow");
   }
   currentOperandStackSize += k;
+}
+
+void InstParser::nextLoc(VarDesignation designation) {
+  int32_t index = nextSigned();
+  verifier.verifyLocation(designation, index);
+}
+
+VarDesignation InstParser::nextDesignation() {
+  uint8_t byte = nextByte();
+  if (byte > LOC_Last) {
+    invalidByteFileError("invalid variable designation {:#x}", byte);
+  }
+  return static_cast<VarDesignation>(byte);
 }
 
 const uint8_t *InstParser::nextIp() {
@@ -275,21 +291,23 @@ void InstParser::parse() {
   case I_LD_Local:
   case I_LD_Arg:
   case I_LD_Access: {
-    // TODO
+    nextLoc(static_cast<VarDesignation>(low));
+    operandStackPush(1);
     return;
   }
   case I_LDA_Global:
   case I_LDA_Local:
   case I_LDA_Arg:
   case I_LDA_Access: {
-    // TODO
+    nextLoc(static_cast<VarDesignation>(low));
+    operandStackPush(2);
     return;
   }
   case I_ST_Global:
   case I_ST_Local:
   case I_ST_Arg:
   case I_ST_Access: {
-    // TODO
+    nextLoc(static_cast<VarDesignation>(low));
     return;
   }
   case I_CJMPz:
@@ -323,9 +341,8 @@ void InstParser::parse() {
                            nclosurevars, verifier.ioffsetOf(closureIp));
     }
     for (int i = 0; i < nclosurevars; ++i) {
-      // TODO
-      nextByte();
-      nextSigned();
+      VarDesignation designation = nextDesignation();
+      nextLoc(designation);
     }
     verifier.enqueueClosure(closureIp, nclosurevars);
     operandStackPush(1);
@@ -424,6 +441,41 @@ Verifier::Verifier(ByteFile &file)
       codeBegin(file.getCode()),
       codeEnd(file.getCode() + file.getCodeSizeBytes()) {}
 
+void Verifier::verifyLocation(VarDesignation designation, int32_t index) {
+  if (index < 0) {
+    invalidByteFileError("negative location index {}", index);
+  }
+  switch (designation) {
+  case LOC_Global: {
+    if (index >= file.getGlobalAreaSize()) {
+      invalidByteFileError("global variable at index {} is out-of-bounds {}",
+                           index, file.getGlobalAreaSize());
+    }
+    break;
+  }
+  case LOC_Local: {
+    if (index >= currentFunction.nlocals) {
+      invalidByteFileError("local variable at index {} is out-of-bounds {}",
+                           index, currentFunction.nlocals);
+    }
+    break;
+  }
+  case LOC_Arg: {
+    if (index >= currentFunction.nargs) {
+      invalidByteFileError("argument at index {} is out-of-bounds {}", index,
+                           currentFunction.nargs);
+    }
+    break;
+  }
+  case LOC_Access: {
+    if (index >= currentFunction.nclosurevars) {
+      invalidByteFileError("closure variable at index {} is out-of-bounds {}",
+                           index, currentFunction.nclosurevars);
+    }
+    break;
+  }
+  }
+}
 void Verifier::verifyString(int32_t offset) {
   if (offset < 0 || offset >= file.getStringTableSize()) {
     invalidByteFileError("invalid string with out-of-bounds address {:#x}",
@@ -587,7 +639,6 @@ void Verifier::verify() {
   verifyStringTable();
   verifyPublicSymTab();
   parse();
-  invalidByteFileError("NOT IMPLEMENTED");
 }
 
 void lama::verify(ByteFile &file) { Verifier(file).verify(); }

@@ -28,7 +28,7 @@ void ByteFile::init() {
   }
   currentOffset += sizeof(int32_t);
 
-  size_t globalAreaSizeWords = header[1];
+  globalAreaSizeWords = header[1];
   if (globalAreaSizeWords < 0) {
     throwOnInvalidFile(fmt::format(
         fmt::format("global area size is negative ({})", globalAreaSizeWords)));

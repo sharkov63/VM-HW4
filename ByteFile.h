@@ -28,6 +28,8 @@ public:
   [[deprecated]]
   const char *getStringAt(size_t offset) const;
 
+  size_t getGlobalAreaSize() const { return globalAreaSizeWords; }
+
 private:
   void init();
 
@@ -43,6 +45,8 @@ private:
 
   const uint8_t *code;
   size_t codeSizeBytes;
+
+  size_t globalAreaSizeWords;
 };
 
 } // namespace lama
