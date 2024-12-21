@@ -32,6 +32,7 @@ enum InstCode {
   I_END = 0x16,
   I_DROP = 0x18,
   I_DUP = 0x19,
+  I_SWAP = 0x1a,
   I_ELEM = 0x1b,
 
   I_LD_Global = 0x20,
