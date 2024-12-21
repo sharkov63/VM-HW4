@@ -4,6 +4,7 @@
 #include "fmt/format.h"
 #include <assert.h>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -40,6 +41,7 @@ struct FunctionInfo {
 
 struct InstInfo {
   int8_t flags = 0;
+  int8_t length;
   int16_t operandStackSize;
 
   bool isReached() const noexcept { return flags & II_REACHED; }
@@ -53,6 +55,8 @@ public:
   /// \throws InvalidByteFileError on invalid bytefile
   void verify();
 
+  void augument() noexcept;
+
 private:
   void verifyStringTable();
   /// \throws InvalidByteFileError on invalid public symbol table
@@ -60,6 +64,8 @@ private:
 
   void parse();
   void parseFunction(const uint8_t *beginIp);
+
+  void augumentFunction(const uint8_t *beginIp);
 
   void enqueuePublicSymbols();
   /// \pre #ip is valid
@@ -359,8 +365,12 @@ void InstParser::parse() {
   }
   case I_CALL: {
     const uint8_t *functionIp = nextIp();
-    nextSigned();
+    int32_t nargs = nextSigned();
+    if (nargs < 0) {
+      invalidByteFileError("negative nargs {} in CALL", nargs);
+    }
     verifier.enqueueFunction(functionIp);
+    operandStackPop(nargs);
     operandStackPush(1);
     return;
   }
@@ -502,6 +512,13 @@ const uint8_t *Verifier::lookUpIp(int32_t ioffset) {
 
 void Verifier::parseAt(const uint8_t *ip) {
   InstParser parser(ip, *this);
+  parser.parse();
+  int32_t length = parser.getNextIp() - ip;
+  if (length >= std::numeric_limits<uint8_t>::max()) {
+    invalidByteFileError("too large length {} of instruction at {:#x}", length,
+                         ioffsetOf(ip));
+  }
+  instInfoOf(ip)->length = length;
   if (parser.getJumpTarget()) {
     enqueueInst(parser.getJumpTarget(), parser.getNextOperandStackSize());
   }
@@ -582,6 +599,24 @@ void Verifier::enqueuePublicSymbols() {
   }
 }
 
+void Verifier::augumentFunction(const uint8_t *beginIp) {
+  const uint8_t *ip = beginIp;
+  int16_t maxOperandStackSize = 0;
+  while (*ip != I_END) {
+    InstInfo *info = instInfoOf(ip);
+    maxOperandStackSize = std::max(maxOperandStackSize, info->operandStackSize);
+    ip += info->length;
+    if (ip >= codeEnd) {
+      invalidByteFileError("reached code end starting from function at {:#x}",
+                           ioffsetOf(beginIp));
+    }
+  }
+  int32_t nargs;
+  memcpy(&nargs, beginIp + 1, sizeof(nargs));
+  nargs |= ((int32_t)maxOperandStackSize << 16);
+  memcpy(const_cast<uint8_t *>(beginIp) + 1, &nargs, sizeof(nargs));
+}
+
 void Verifier::parseFunction(const uint8_t *beginIp) {
   FunctionInfo *info = functionInfoOf(beginIp);
   if (info->isClosure())
@@ -641,4 +676,13 @@ void Verifier::verify() {
   parse();
 }
 
-void lama::verify(ByteFile &file) { Verifier(file).verify(); }
+void Verifier::augument() noexcept {
+  for (const uint8_t *beginIp : functions)
+    augumentFunction(beginIp);
+}
+
+void lama::verify(ByteFile &file) {
+  Verifier verifier(file);
+  verifier.verify();
+  verifier.augument();
+}

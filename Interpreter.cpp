@@ -85,22 +85,12 @@ struct Stack {
     *top() = value;
     --top();
   }
-  static Value peakOperand() {
-    checkNonEmptyOperandStack();
-    return top()[1];
-  }
+  static Value peakOperand() { return top()[1]; }
   static Value popOperand() {
-    checkNonEmptyOperandStack();
     ++top();
     return *top();
   }
-  static void popNOperands(size_t noperands) {
-    if (getOperandStackSize() < noperands) {
-      runtimeError("cannot pop {} operands because operand stack size is {}",
-                   noperands, getOperandStackSize());
-    }
-    top() += noperands;
-  }
+  static void popNOperands(size_t noperands) { top() += noperands; }
 
   static void pushIntOperand(int32_t operand) { pushOperand(boxInt(operand)); }
   static int32_t popIntOperand() {
@@ -122,13 +112,6 @@ struct Stack {
   static void setNextIsClosure(bool isClousre) { nextIsClosure = isClousre; }
 
   static Value *&top() { return __gc_stack_top; }
-
-private:
-  static void checkNonEmptyOperandStack() {
-    if (getOperandStackSize() == 0) {
-      runtimeError("cannot pop from empty operand stack");
-    }
-  }
 
 private:
   static std::array<Value, STACK_SIZE> data;
@@ -162,28 +145,14 @@ bool Stack::nextIsClosure;
 
 Value Stack::getClosure() { return frame.base[frame.nargs]; }
 
-Value &Stack::accessLocal(ssize_t index) {
-  if (index < 0 || index >= frame.nlocals) {
-    runtimeError(
-        "access local variable out of bounds: index {} is not in [0, {})",
-        index, frame.nlocals);
-  }
-  return frame.base[-index - 1];
-}
+Value &Stack::accessLocal(ssize_t index) { return frame.base[-index - 1]; }
 
 Value &Stack::accessArg(ssize_t index) {
-  if (index < 0 || index >= frame.nargs) {
-    runtimeError("access argument out of bounds: index {} is not in [0, {})",
-                 index, frame.nargs);
-  }
   return frame.base[frame.nargs - 1 - index];
 }
-void Stack::beginFunction(size_t nargs, size_t nlocals) {
+void Stack::beginFunction(size_t rawNargs, size_t nlocals) {
+  size_t nargs = rawNargs & ((1 << 16) - 1);
   size_t noperands = nargs + nextIsClosure;
-  if (getOperandStackSize() < noperands) {
-    runtimeError("expected {} operands, but found only {}", noperands,
-                 getOperandStackSize());
-  }
   if (frameStackSize >= FRAME_STACK_SIZE) {
     runtimeError("frame stack size exhausted");
   }
@@ -196,6 +165,12 @@ void Stack::beginFunction(size_t nargs, size_t nlocals) {
   frame.nlocals = nlocals;
   frame.operandStackBase = top() + 1;
   frame.returnAddress = nextReturnAddress;
+
+  size_t neededOperandStackSize = (nargs >> 16) & ((1 << 16) - 1);
+  if (top() + 1 - neededOperandStackSize < data.begin()) {
+    runtimeError("might exhaust stack");
+  }
+
   // Fill with some boxed values so that GC will skip these
   memset(top() + 1, 1, (char *)frame.base - (char *)(top() + 1));
 }
@@ -203,11 +178,6 @@ void Stack::beginFunction(size_t nargs, size_t nlocals) {
 const uint8_t *Stack::endFunction() {
   if (isEmpty()) {
     runtimeError("no function to end");
-  }
-  if (getOperandStackSize() != 1) {
-    runtimeError(
-        "attempt to end function with operand stack size {}, expected 1",
-        getOperandStackSize());
   }
   const uint8_t *returnAddress = frame.returnAddress;
   Value ret = peakOperand();
@@ -258,6 +228,9 @@ private:
 
   Value &accessVar(char designation, int32_t index);
 
+  const uint8_t *getCode(int32_t address);
+  const char *getString(int32_t offset);
+
 private:
   ByteFile *byteFile;
 
@@ -270,6 +243,14 @@ private:
 Interpreter::Interpreter(ByteFile *byteFile)
     : byteFile(byteFile), instructionPointer(this->byteFile->getCode()),
       codeEnd(instructionPointer + this->byteFile->getCodeSizeBytes()) {}
+
+const char *Interpreter::getString(int32_t offset) {
+  return byteFile->getStringTable() + offset;
+}
+
+const uint8_t *Interpreter::getCode(int32_t address) {
+  return byteFile->getCode() + address;
+}
 
 void Interpreter::run() {
   __gc_init();
@@ -359,7 +340,7 @@ bool Interpreter::step() {
   }
   case I_STRING: {
     uint32_t offset = readWord();
-    const char *cstr = byteFile->getStringAt(offset);
+    const char *cstr = getString(offset);
     Value string = createString(cstr);
     Stack::pushOperand(string);
     return true;
@@ -367,12 +348,8 @@ bool Interpreter::step() {
   case I_SEXP: {
     Value stringOffset = readWord();
     uint32_t nargs = readWord();
-    if (Stack::getOperandStackSize() < nargs) {
-      runtimeError("cannot construct sexp of {} elements: operand stack "
-                   "size is only {}",
-                   nargs, Stack::getOperandStackSize());
-    }
-    const char *string = byteFile->getStringAt(stringOffset);
+
+    const char *string = getString(stringOffset);
     Value tagHash = LtagHash(const_cast<char *>(string));
     std::reverse(Stack::top() + 1, Stack::top() + nargs + 1);
     Stack::pushOperand(0);
@@ -400,7 +377,7 @@ bool Interpreter::step() {
   }
   case I_JMP: {
     uint32_t offset = readWord();
-    instructionPointer = byteFile->getAddressFor(offset);
+    instructionPointer = getCode(offset);
     return true;
   }
   case I_END: {
@@ -460,22 +437,22 @@ bool Interpreter::step() {
     uint32_t offset = readWord();
     bool boolValue = Stack::popIntOperand();
     if (boolValue == (bool)low)
-      instructionPointer = byteFile->getAddressFor(offset);
+      instructionPointer = getCode(offset);
     return true;
   }
   case I_BEGIN:
   case I_BEGINcl: {
-    uint32_t nargs = readWord();
+    uint32_t rawNargs = readWord();
     uint32_t nlocals = readWord();
     bool isClosure = low == 0x3;
-    Stack::beginFunction(nargs, nlocals);
+    Stack::beginFunction(rawNargs, nlocals);
     return true;
   }
   case I_CLOSURE: {
     uint32_t entryOffset = readWord();
     uint32_t n = readWord();
 
-    const uint8_t *entry = byteFile->getAddressFor(entryOffset);
+    const uint8_t *entry = getCode(entryOffset);
 
     Stack::allocateNOperands(n);
     for (int i = 0; i < n; ++i) {
@@ -493,11 +470,6 @@ bool Interpreter::step() {
   }
   case I_CALLC: {
     uint32_t nargs = readWord();
-    if (Stack::getOperandStackSize() < nargs + 1) {
-      runtimeError("cannot call closure with {} args: operand stack size is "
-                   "too small ({})",
-                   nargs, Stack::getOperandStackSize());
-    }
     Value closure = Stack::top()[nargs + 1];
     const uint8_t *entry = *reinterpret_cast<const uint8_t **>(closure);
     Stack::setNextReturnAddress(instructionPointer);
@@ -507,7 +479,7 @@ bool Interpreter::step() {
   }
   case I_CALL: {
     uint32_t offset = readWord();
-    const uint8_t *address = byteFile->getAddressFor(offset);
+    const uint8_t *address = getCode(offset);
     readWord();
     Stack::setNextReturnAddress(instructionPointer);
     Stack::setNextIsClosure(false);
@@ -517,7 +489,7 @@ bool Interpreter::step() {
   case I_TAG: {
     uint32_t stringOffset = readWord();
     uint32_t nargs = readWord();
-    const char *string = byteFile->getStringAt(stringOffset);
+    const char *string = getString(stringOffset);
     Value tag = LtagHash(const_cast<char *>(string));
     Value target = Stack::popOperand();
 
@@ -611,11 +583,6 @@ bool Interpreter::step() {
   }
   case I_CALL_Barray: {
     uint32_t nargs = readWord();
-    if (Stack::getOperandStackSize() < nargs) {
-      runtimeError("cannot construct array of {} elements: operand stack "
-                   "size is only {}",
-                   nargs, Stack::getOperandStackSize());
-    }
     std::reverse(Stack::top() + 1, Stack::top() + nargs + 1);
     Value array = createArray(nargs);
     Stack::popNOperands(nargs);
@@ -626,15 +593,9 @@ bool Interpreter::step() {
   runtimeError("unsupported instruction code {:#04x}", byte);
 }
 
-char Interpreter::readByte() {
-  if (instructionPointer > codeEnd - 1)
-    runtimeError("unexpected end of bytecode, expected a byte");
-  return *instructionPointer++;
-}
+char Interpreter::readByte() { return *instructionPointer++; }
 
 int32_t Interpreter::readWord() {
-  if (instructionPointer > codeEnd - 4)
-    runtimeError("unexpected end of bytecode, expected a word");
   int32_t word;
   memcpy(&word, instructionPointer, sizeof(int32_t));
   instructionPointer += sizeof(int32_t);

@@ -22,12 +22,6 @@ public:
   size_t getPublicSymbolNum() const { return publicSymbolsNum; }
   const int32_t *getPublicSymbolTable() const { return publicSymbolTable; }
 
-  [[deprecated]]
-  const uint8_t *getAddressFor(size_t offset) const;
-
-  [[deprecated]]
-  const char *getStringAt(size_t offset) const;
-
   size_t getGlobalAreaSize() const { return globalAreaSizeWords; }
 
 private:
