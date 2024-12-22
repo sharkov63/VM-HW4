@@ -63,19 +63,21 @@ Sort    2.01
 
 `rapidlama`
 ```
-[HW4] /usr/bin/time -f "Sort\t%U" ./rapidlama performance/Sort.bc                                                    main  ✭ ✱
-verification time: 00.000039391
-interpretation time: 01.831025238
-Sort    1.83
-[HW4] /usr/bin/time -f "Sort\t%U" ./rapidlama performance/Sort.bc                                                    main  ✭ ✱
-verification time: 00.000104483
-interpretation time: 01.827249459
-Sort    1.82
-[HW4] /usr/bin/time -f "Sort\t%U" ./rapidlama performance/Sort.bc                                                    main  ✭ ✱
-verification time: 00.000098477
-interpretation time: 01.832083235
-Sort    1.82
+[HW4] /usr/bin/time -f "Sort\t%U" ./rapidlama performance/Sort.bc                                                      main  ✭
+finished verification
+verification time: 00.000081576
+interpretation time: 01.783822899
+Sort    1.77
+[HW4] /usr/bin/time -f "Sort\t%U" ./rapidlama performance/Sort.bc                                                      main  ✭
+finished verification
+verification time: 00.000110771
+interpretation time: 01.780764308
+Sort    1.77
+[HW4] /usr/bin/time -f "Sort\t%U" ./rapidlama performance/Sort.bc                                                      main  ✭
+finished verification
+verification time: 00.000069214
+interpretation time: 01.776057840
+Sort    1.76
 ```
-
 
 As we can see, verification time is negligible.

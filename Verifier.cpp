@@ -4,6 +4,7 @@
 #include "fmt/format.h"
 #include <assert.h>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -22,17 +23,19 @@ template <typename... A>
 
 static constexpr int32_t II_REACHED = (1 << 0);
 
-static constexpr int32_t FI_REACHED = (1 << 0);
-static constexpr int32_t FI_IS_CLOSURE = (1 << 1);
+static constexpr int32_t FI_IS_CLOSURE = (1 << 0);
+
+using FunctionIndex = int32_t;
+static constexpr FunctionIndex InvalidFunctionIndex = -1;
 
 namespace {
 
 struct FunctionInfo {
   int8_t flags = 0;
   int16_t nclosurevars = 0;
+  const uint8_t *beginIp;
+  std::vector<const uint8_t *> insts;
 
-  bool isReached() const noexcept { return flags & FI_REACHED; }
-  void setReached() noexcept { flags |= FI_REACHED; }
   bool isClosure() const noexcept { return flags & FI_IS_CLOSURE; }
   bool isNonClosure() const noexcept { return !isClosure(); }
   void setClosure() noexcept { flags |= FI_IS_CLOSURE; }
@@ -41,7 +44,6 @@ struct FunctionInfo {
 
 struct InstInfo {
   int8_t flags = 0;
-  int8_t length;
   int16_t operandStackSize;
 
   bool isReached() const noexcept { return flags & II_REACHED; }
@@ -63,9 +65,9 @@ private:
   void verifyPublicSymTab();
 
   void parse();
-  void parseFunction(const uint8_t *beginIp);
+  void parseFunction(FunctionIndex functionIndex);
 
-  void augumentFunction(const uint8_t *beginIp);
+  void augumentFunction(FunctionIndex functionIndex);
 
   void enqueuePublicSymbols();
   /// \pre #ip is valid
@@ -94,8 +96,8 @@ private:
   }
 
   /// \pre #ip is valid and start of the function
-  FunctionInfo *functionInfoOf(const uint8_t *beginIp) {
-    return functionInfo.get() + ioffsetOf(beginIp);
+  FunctionIndex &functionIndexOf(const uint8_t *beginIp) {
+    return functionIndex[ioffsetOf(beginIp)];
   }
 
   friend class InstParser;
@@ -103,14 +105,14 @@ private:
 private:
   ByteFile &file;
   std::unique_ptr<InstInfo[]> instInfo;
-  std::unique_ptr<FunctionInfo[]> functionInfo;
+  std::unique_ptr<FunctionIndex[]> functionIndex;
   std::vector<const uint8_t *> instStack;
-  std::vector<const uint8_t *> functions;
-  size_t nextFunctionIdx;
+  std::vector<FunctionInfo> functions;
   const uint8_t *const codeBegin;
   const uint8_t *const codeEnd;
 
   struct {
+    FunctionIndex index;
     int32_t nargs;
     int32_t nlocals;
     int32_t nclosurevars;
@@ -145,12 +147,12 @@ private:
 private:
   Verifier &verifier;
   const uint8_t *const beginIp;
+  const uint8_t *ip;
+  InstInfo *const info;
   const uint8_t byte;
   const uint8_t high;
   const uint8_t low;
-  InstInfo *const info;
 
-  const uint8_t *ip;
   int32_t currentOperandStackSize;
 
   const uint8_t *jumpTarget = nullptr;
@@ -237,6 +239,7 @@ void InstParser::parse() {
   case I_BINOP_And:
   case I_BINOP_Or: {
     operandStackPop(2);
+    operandStackPush(1);
     return;
   }
   case I_CONST: {
@@ -274,6 +277,10 @@ void InstParser::parse() {
     return;
   }
   case I_END: {
+    if (currentOperandStackSize != 1) {
+      invalidByteFileError("operandStackSize on END is not 1: {}",
+                           currentOperandStackSize);
+    }
     stop = true;
     return;
   }
@@ -447,9 +454,12 @@ void InstParser::parse() {
 
 Verifier::Verifier(ByteFile &file)
     : file(file), instInfo(new InstInfo[file.getCodeSizeBytes()]),
-      functionInfo(new FunctionInfo[file.getCodeSizeBytes()]),
+      functionIndex(new FunctionIndex[file.getCodeSizeBytes()]),
       codeBegin(file.getCode()),
-      codeEnd(file.getCode() + file.getCodeSizeBytes()) {}
+      codeEnd(file.getCode() + file.getCodeSizeBytes()) {
+  for (int i = 0; i < file.getCodeSizeBytes(); ++i)
+    functionIndex[i] = InvalidFunctionIndex;
+}
 
 void Verifier::verifyLocation(VarDesignation designation, int32_t index) {
   if (index < 0) {
@@ -513,12 +523,6 @@ const uint8_t *Verifier::lookUpIp(int32_t ioffset) {
 void Verifier::parseAt(const uint8_t *ip) {
   InstParser parser(ip, *this);
   parser.parse();
-  int32_t length = parser.getNextIp() - ip;
-  if (length >= std::numeric_limits<uint8_t>::max()) {
-    invalidByteFileError("too large length {} of instruction at {:#x}", length,
-                         ioffsetOf(ip));
-  }
-  instInfoOf(ip)->length = length;
   if (parser.getJumpTarget()) {
     enqueueInst(parser.getJumpTarget(), parser.getNextOperandStackSize());
   }
@@ -528,28 +532,31 @@ void Verifier::parseAt(const uint8_t *ip) {
 }
 
 void Verifier::enqueueClosure(const uint8_t *beginIp, int16_t nclosurevars) {
-  if (*beginIp != I_BEGINcl) {
+  if (*beginIp != I_BEGIN && *beginIp != I_BEGINcl) {
     invalidByteFileError("a closure begins with bytecode {:#x}, "
-                         "expected CBEGIN ({:#x})",
-                         *beginIp, (int)I_BEGINcl);
+                         "expected CBEGIN ({:#x}) or BEGIN ({:#x})",
+                         *beginIp, (int)I_BEGINcl, (int)I_BEGIN);
   }
-  FunctionInfo *info = functionInfoOf(beginIp);
-  if (info->isReached()) {
-    if (info->isNonClosure()) {
+  FunctionIndex &index = functionIndexOf(beginIp);
+  if (index != InvalidFunctionIndex) {
+    const FunctionInfo &info = functions[index];
+    if (info.isNonClosure()) {
       invalidByteFileError("function at {:#x} is both closure and non-closure",
                            ioffsetOf(beginIp));
     }
-    if (info->nclosurevars != nclosurevars) {
+    if (info.nclosurevars != nclosurevars) {
       invalidByteFileError(
           "inconsistent variable count ({} vs. {}) for closure at {:#x}",
-          info->nclosurevars, nclosurevars, ioffsetOf(beginIp));
+          info.nclosurevars, nclosurevars, ioffsetOf(beginIp));
     }
     return;
   }
-  info->setReached();
-  info->setClosure();
-  info->nclosurevars = nclosurevars;
-  functions.push_back(beginIp);
+  index = functions.size();
+  FunctionInfo info;
+  info.setClosure();
+  info.nclosurevars = nclosurevars;
+  info.beginIp = beginIp;
+  functions.emplace_back(std::move(info));
 }
 
 void Verifier::enqueueFunction(const uint8_t *beginIp) {
@@ -558,17 +565,20 @@ void Verifier::enqueueFunction(const uint8_t *beginIp) {
                          "expected BEGIN ({:#x})",
                          *beginIp, (int)I_BEGIN);
   }
-  FunctionInfo *info = functionInfoOf(beginIp);
-  if (info->isReached()) {
-    if (info->isClosure()) {
+  FunctionIndex &index = functionIndexOf(beginIp);
+  if (index != InvalidFunctionIndex) {
+    const FunctionInfo &info = functions[index];
+    if (info.isClosure()) {
       invalidByteFileError("function at {:#x} is both closure and non-closure",
                            ioffsetOf(beginIp));
     }
     return;
   }
-  info->setReached();
-  info->setNonClosure();
-  functions.push_back(beginIp);
+  index = functions.size();
+  FunctionInfo info;
+  info.setNonClosure();
+  info.beginIp = beginIp;
+  functions.emplace_back(std::move(info));
 }
 
 void Verifier::enqueueInst(const uint8_t *ip, int16_t currentOperandStackSize) {
@@ -587,6 +597,7 @@ void Verifier::enqueueInst(const uint8_t *ip, int16_t currentOperandStackSize) {
   }
   info->setReached();
   info->operandStackSize = currentOperandStackSize;
+  functions[currentFunction.index].insts.push_back(ip);
   instStack.push_back(ip);
 }
 
@@ -599,28 +610,29 @@ void Verifier::enqueuePublicSymbols() {
   }
 }
 
-void Verifier::augumentFunction(const uint8_t *beginIp) {
-  const uint8_t *ip = beginIp;
+void Verifier::augumentFunction(FunctionIndex functionIndex) {
+  auto &function = functions[functionIndex];
   int16_t maxOperandStackSize = 0;
-  while (*ip != I_END) {
+  for (const uint8_t *ip : function.insts) {
     InstInfo *info = instInfoOf(ip);
     maxOperandStackSize = std::max(maxOperandStackSize, info->operandStackSize);
-    ip += info->length;
-    if (ip >= codeEnd) {
-      invalidByteFileError("reached code end starting from function at {:#x}",
-                           ioffsetOf(beginIp));
-    }
   }
+  const uint8_t *beginIp = function.beginIp;
   int32_t nargs;
   memcpy(&nargs, beginIp + 1, sizeof(nargs));
   nargs |= ((int32_t)maxOperandStackSize << 16);
   memcpy(const_cast<uint8_t *>(beginIp) + 1, &nargs, sizeof(nargs));
 }
 
-void Verifier::parseFunction(const uint8_t *beginIp) {
-  FunctionInfo *info = functionInfoOf(beginIp);
-  if (info->isClosure())
-    currentFunction.nclosurevars = info->nclosurevars;
+void Verifier::parseFunction(FunctionIndex functionIndex) {
+  currentFunction.index = functionIndex;
+  FunctionInfo &functionInfo = functions[functionIndex];
+  const uint8_t *beginIp = functionInfo.beginIp;
+  if (functionInfo.isClosure())
+    currentFunction.nclosurevars = functionInfo.nclosurevars;
+  InstInfo *instInfo = instInfoOf(beginIp);
+  instInfo->setReached();
+  instInfo->operandStackSize = 0;
   instStack.push_back(beginIp);
   while (!instStack.empty()) {
     const uint8_t *ip = instStack.back();
@@ -628,19 +640,21 @@ void Verifier::parseFunction(const uint8_t *beginIp) {
     try {
       parseAt(ip);
     } catch (InvalidByteFileError &e) {
-      invalidByteFileError("failed to parse at instruction {:#x}: {}",
+      invalidByteFileError("failed to parse instruction at {:#x}: {}",
                            ioffsetOf(ip), e.what());
     }
   }
 }
 
 void Verifier::parse() {
-  while (nextFunctionIdx < functions.size()) {
-    const uint8_t *beginIp = functions[nextFunctionIdx++];
+  enqueuePublicSymbols();
+  for (FunctionIndex currentFunctionIndex = 0;
+       currentFunctionIndex < functions.size(); ++currentFunctionIndex) {
     try {
-      parseFunction(beginIp);
+      parseFunction(currentFunctionIndex);
     } catch (InvalidByteFileError &e) {
-      invalidByteFileError("in function {:#x}: {}", ioffsetOf(beginIp),
+      invalidByteFileError("in function {:#x}: {}",
+                           ioffsetOf(functions[currentFunctionIndex].beginIp),
                            e.what());
     }
   }
@@ -677,8 +691,8 @@ void Verifier::verify() {
 }
 
 void Verifier::augument() noexcept {
-  for (const uint8_t *beginIp : functions)
-    augumentFunction(beginIp);
+  for (FunctionIndex index = 0; index < functions.size(); ++index)
+    augumentFunction(index);
 }
 
 void lama::verify(ByteFile &file) {

@@ -19,6 +19,7 @@ int main(int argc, const char **argv) {
   try {
     ByteFile byteFile = ByteFile::load(byteFilePath);
     verify(byteFile);
+    std::cerr << "finished verification" << std::endl;
     auto verifiedTime = std::chrono::steady_clock::now();
     auto verificationDuration = verifiedTime - startTime;
     interpret(byteFile);
